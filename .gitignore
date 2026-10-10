@@ -1,0 +1,39 @@
+# Environment and Secrets
+.env
+.env.*
+!.env.example
+*.env
+
+# Node.js
+**/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+
+# Flutter and Dart
+**/.dart_tool/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/.pub-cache/
+**/.pub/
+**/build/
+**/coverage/
+
+# Android
+**/.gradle/
+**/local.properties
+**/android/gradle/wrapper/gradle-wrapper.jar
+**/android/app/debug/
+**/android/app/profile/
+**/android/app/release/
+**/*.apk
+**/*.aab
+**/hs_err_pid*.log
+
+# IDE & OS
+.DS_Store
+.idea/
+.vscode/
+*.iml
+*.log
