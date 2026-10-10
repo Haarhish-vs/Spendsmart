@@ -2,13 +2,16 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 class ApiClient {
+  // Live Render production backend
+  static const String productionBaseUrl = 'https://spendsmart-k8sh.onrender.com/api/v1';
+
   // Ordered fallback URLs:
   // 1. Live Render production backend
   // 2. LAN Wi-Fi IP of development machine
   // 3. USB reverse loopback
   // 4. Android Emulator alias
   static const List<String> candidateBaseUrls = [
-    'https://spendsmart-k8sh.onrender.com/api/v1',
+    productionBaseUrl,
     'http://172.27.142.75:5000/api/v1',
     'http://127.0.0.1:5000/api/v1',
     'http://10.0.2.2:5000/api/v1',
