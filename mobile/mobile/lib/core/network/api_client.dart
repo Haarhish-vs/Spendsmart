@@ -69,23 +69,23 @@ class ApiClient {
   }
 
   Future<dynamic> _executeWithFallback(Future<http.Response> Function(String url) requestFn) async {
-    // Try currently active URL first
+    // Try currently active URL first (allow up to 30s for Render cold-starts / cellular latency)
     try {
-      final response = await requestFn(activeBaseUrl).timeout(const Duration(seconds: 4));
+      final response = await requestFn(activeBaseUrl).timeout(const Duration(seconds: 30));
       return _handleResponse(response);
     } catch (e) {
-      // If network failure / connection refused, try alternate candidates
+      // If network failure / connection refused on production, try alternate local candidates if available
       for (final candidate in candidateBaseUrls) {
         if (candidate == activeBaseUrl) continue;
         try {
-          final response = await requestFn(candidate).timeout(const Duration(seconds: 3));
+          final response = await requestFn(candidate).timeout(const Duration(seconds: 5));
           activeBaseUrl = candidate; // Remember working candidate
           return _handleResponse(response);
         } catch (_) {
           continue;
         }
       }
-      throw Exception('Could not connect to SpendSmart backend. Check that PC is running and on same Wi-Fi ($activeBaseUrl). Error: $e');
+      throw Exception('Could not connect to SpendSmart backend ($activeBaseUrl). Please check your internet connection and try again.');
     }
   }
 
