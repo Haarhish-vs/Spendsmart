@@ -1,5 +1,6 @@
 import '../../../core/network/api_client.dart';
 import '../../../core/utils/app_storage.dart';
+import '../../notifications/services/push_notification_service.dart';
 
 class OnboardingService {
   final ApiClient apiClient;
@@ -44,6 +45,9 @@ class OnboardingService {
         weeklyBudget: weeklyBudget,
         monthlyBudget: monthlyBudget,
       );
+
+      // Register device token with backend for push notifications
+      PushNotificationService.syncDeviceToken();
 
       return data;
     }

@@ -1,8 +1,5 @@
-/**
- * Firebase Admin messaging client wrapper placeholder
- */
-const firebaseMessaging = null;
+const { messaging } = require('../../config/firebase');
 
 module.exports = {
-  firebaseMessaging,
+  getMessagingClient: () => messaging,
 };

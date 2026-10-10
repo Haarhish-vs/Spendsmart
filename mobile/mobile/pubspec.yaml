@@ -39,6 +39,8 @@ dependencies:
   permission_handler: 11.3.1
   intl: ^0.20.3
   flutter_sms_inbox: ^1.0.5
+  firebase_core: ^4.15.0
+  firebase_messaging: ^16.7.0
 
 dev_dependencies:
   flutter_test:

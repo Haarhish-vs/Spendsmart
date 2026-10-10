@@ -3,6 +3,9 @@
 .env.*
 !.env.example
 *.env
+*serviceAccountKey*
+serviceAccountKey.json
+serviceAccountKey.json.json
 
 # Node.js
 **/node_modules/
