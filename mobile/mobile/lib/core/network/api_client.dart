@@ -3,10 +3,12 @@ import 'package:http/http.dart' as http;
 
 class ApiClient {
   // Ordered fallback URLs:
-  // 1. LAN Wi-Fi IP of development machine (works on standalone physical phone APK)
-  // 2. USB reverse loopback (works when connected via USB with `adb reverse`)
-  // 3. Android Emulator alias (maps to localhost:5000 in Android emulator)
+  // 1. Live Render production backend
+  // 2. LAN Wi-Fi IP of development machine
+  // 3. USB reverse loopback
+  // 4. Android Emulator alias
   static const List<String> candidateBaseUrls = [
+    'https://spendsmart-k8sh.onrender.com/api/v1',
     'http://172.27.142.75:5000/api/v1',
     'http://127.0.0.1:5000/api/v1',
     'http://10.0.2.2:5000/api/v1',
