@@ -30,9 +30,19 @@ class BudgetRepository {
       .eq('user_id', userId)
       .eq('transaction_type', 'expense');
 
-    if (tErr) throw tErr;
+    // Retrieve tracking_start from auth user_metadata
+    let trackingStart = null;
+    try {
+      const { data: userData } = await supabase.auth.admin.getUserById(userId);
+      trackingStart = userData?.user?.user_metadata?.tracking_start || null;
+    } catch (_) {}
 
-    const allTx = transactions || [];
+    const trackingStartIso = trackingStart ? new Date(trackingStart).toISOString() : null;
+    const allTx = (transactions || []).filter((tx) => {
+      if (!trackingStartIso) return true;
+      return new Date(tx.transaction_date).toISOString() >= trackingStartIso;
+    });
+
     const now = new Date();
 
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0).toISOString();

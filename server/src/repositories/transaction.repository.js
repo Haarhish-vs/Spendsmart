@@ -211,14 +211,27 @@ class TransactionRepository {
 
     if (txErr) throw txErr;
 
-    const transactions = allTxs || [];
+    // Fetch user metadata for selected bank & tracking_start
+    let selectedBank = null;
+    let trackingStart = null;
+    try {
+      const { data: userData } = await supabase.auth.admin.getUserById(userId);
+      selectedBank = userData?.user?.user_metadata?.selected_bank || null;
+      trackingStart = userData?.user?.user_metadata?.tracking_start || null;
+    } catch (_) {}
 
-    // Compute spent sums
+    const trackingStartIso = trackingStart ? new Date(trackingStart).toISOString() : null;
+    const eligibleTransactions = (allTxs || []).filter((tx) => {
+      if (!trackingStartIso) return true;
+      return new Date(tx.transaction_date).toISOString() >= trackingStartIso;
+    });
+
+    // Compute spent sums from eligible transactions only
     let todaySpent = 0;
     let weekSpent = 0;
     let monthSpent = 0;
 
-    for (const tx of transactions) {
+    for (const tx of eligibleTransactions) {
       const txIso = new Date(tx.transaction_date).toISOString();
 
       if (txIso >= startOfToday && txIso <= endOfToday) {
@@ -245,13 +258,6 @@ class TransactionRepository {
     const weeklyBudget = budgets?.find((b) => b.period === 'weekly')?.amount ?? 0;
     const monthlyBudget = budgets?.find((b) => b.period === 'monthly')?.amount ?? 0;
 
-    // Fetch user metadata for selected bank
-    let selectedBank = null;
-    try {
-      const { data: userData } = await supabase.auth.admin.getUserById(userId);
-      selectedBank = userData?.user?.user_metadata?.selected_bank || null;
-    } catch (_) {}
-
     return {
       user_id: userId,
       selected_bank: selectedBank,
@@ -261,7 +267,7 @@ class TransactionRepository {
       daily_budget: dailyBudget,
       weekly_budget: weeklyBudget,
       monthly_budget: monthlyBudget,
-      recent_transactions: transactions.slice(0, 10),
+      recent_transactions: eligibleTransactions.slice(0, 10),
     };
   }
 }

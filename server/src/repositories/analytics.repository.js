@@ -21,9 +21,18 @@ class AnalyticsRepository {
       .eq('user_id', userId)
       .order('transaction_date', { ascending: false });
 
-    if (tErr) throw tErr;
+    // Retrieve tracking_start from auth user_metadata
+    let trackingStart = null;
+    try {
+      const { data: userData } = await supabase.auth.admin.getUserById(userId);
+      trackingStart = userData?.user?.user_metadata?.tracking_start || null;
+    } catch (_) {}
 
-    const transactions = allTxs || [];
+    const trackingStartIso = trackingStart ? new Date(trackingStart).toISOString() : null;
+    const transactions = (allTxs || []).filter((tx) => {
+      if (!trackingStartIso) return true;
+      return new Date(tx.transaction_date).toISOString() >= trackingStartIso;
+    });
 
     // Date ranges
     const now = new Date();
