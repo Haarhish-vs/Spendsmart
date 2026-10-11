@@ -30,6 +30,12 @@ class PushNotificationService {
       );
       debugPrint('[FCM] Permission status: ${settings.authorizationStatus}');
 
+      await messaging.setForegroundNotificationPresentationOptions(
+        alert: true,
+        badge: true,
+        sound: true,
+      );
+
       // 2. Fetch and register token
       await syncDeviceToken();
 
