@@ -77,7 +77,23 @@ class ProfileRepository {
 
     if (profileErr) throw profileErr;
 
-    // 2. Insert or update budgets for daily, weekly, monthly
+    // 2. Persist selected_bank, tracking_start, and employment_status in Supabase Auth user_metadata
+    try {
+      const { data: userData } = await supabase.auth.admin.getUserById(userId);
+      const existingMeta = userData?.user?.user_metadata || {};
+      await supabase.auth.admin.updateUserById(userId, {
+        user_metadata: {
+          ...existingMeta,
+          selected_bank: selected_bank || null,
+          tracking_start: tracking_start || null,
+          employment_status: employment_status || null,
+        },
+      });
+    } catch (metaErr) {
+      console.warn('Could not update user_metadata in auth:', metaErr.message);
+    }
+
+    // 3. Insert or update budgets for daily, weekly, monthly
     const today = new Date().toISOString().split('T')[0];
 
     // Deactivate or remove existing budgets for this user
@@ -127,11 +143,16 @@ class ProfileRepository {
     }
 
     return {
-      profile,
+      profile: {
+        ...profile,
+        selected_bank: selected_bank || null,
+        tracking_start: tracking_start || null,
+        employment_status: employment_status || null,
+      },
       budgets: insertedBudgets,
-      selected_bank: selected_bank || 'HDFC Bank',
-      employment_status: employment_status || 'employed',
-      tracking_start: tracking_start || new Date().toISOString(),
+      selected_bank: selected_bank || null,
+      employment_status: employment_status || null,
+      tracking_start: tracking_start || null,
     };
   }
 
@@ -157,9 +178,24 @@ class ProfileRepository {
 
     if (bErr) throw bErr;
 
+    // Retrieve selected_bank & metadata from auth.users
+    let metadata = {};
+    try {
+      const { data: userData } = await supabase.auth.admin.getUserById(userId);
+      metadata = userData?.user?.user_metadata || {};
+    } catch (_) {}
+
     return {
-      profile,
+      profile: {
+        ...profile,
+        selected_bank: metadata.selected_bank || null,
+        tracking_start: metadata.tracking_start || null,
+        employment_status: metadata.employment_status || null,
+      },
       budgets: budgets || [],
+      selected_bank: metadata.selected_bank || null,
+      tracking_start: metadata.tracking_start || null,
+      employment_status: metadata.employment_status || null,
     };
   }
 }

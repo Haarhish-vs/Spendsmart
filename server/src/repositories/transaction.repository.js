@@ -241,12 +241,20 @@ class TransactionRepository {
 
     if (bErr) throw bErr;
 
-    const dailyBudget = budgets?.find((b) => b.period === 'daily')?.amount || 500;
-    const weeklyBudget = budgets?.find((b) => b.period === 'weekly')?.amount || 3000;
-    const monthlyBudget = budgets?.find((b) => b.period === 'monthly')?.amount || 12000;
+    const dailyBudget = budgets?.find((b) => b.period === 'daily')?.amount ?? 0;
+    const weeklyBudget = budgets?.find((b) => b.period === 'weekly')?.amount ?? 0;
+    const monthlyBudget = budgets?.find((b) => b.period === 'monthly')?.amount ?? 0;
+
+    // Fetch user metadata for selected bank
+    let selectedBank = null;
+    try {
+      const { data: userData } = await supabase.auth.admin.getUserById(userId);
+      selectedBank = userData?.user?.user_metadata?.selected_bank || null;
+    } catch (_) {}
 
     return {
       user_id: userId,
+      selected_bank: selectedBank,
       today_spent: todaySpent,
       week_spent: weekSpent,
       month_spent: monthSpent,

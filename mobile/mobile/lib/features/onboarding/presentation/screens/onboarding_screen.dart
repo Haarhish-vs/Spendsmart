@@ -24,11 +24,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   // Onboarding form state
   String _employmentStatus = 'employed'; // 'employed' or 'unemployed'
-  final TextEditingController _salaryController = TextEditingController(text: '30000');
-  final TextEditingController _dailyBudgetController = TextEditingController(text: '500');
-  final TextEditingController _weeklyBudgetController = TextEditingController(text: '3000');
-  final TextEditingController _monthlyBudgetController = TextEditingController(text: '12000');
-  String _selectedBank = 'HDFC Bank';
+  final TextEditingController _salaryController = TextEditingController();
+  final TextEditingController _dailyBudgetController = TextEditingController();
+  final TextEditingController _weeklyBudgetController = TextEditingController();
+  final TextEditingController _monthlyBudgetController = TextEditingController();
+  String? _selectedBank;
 
   final List<String> _bankOptions = [
     'HDFC Bank',
@@ -87,6 +87,32 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 
   Future<void> _submitOnboarding() async {
+    if (_selectedBank == null || _selectedBank!.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please select your bank to finish setup'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+      return;
+    }
+
+    final double? dailyBudget = double.tryParse(_dailyBudgetController.text.trim());
+    final double? weeklyBudget = double.tryParse(_weeklyBudgetController.text.trim());
+    final double? monthlyBudget = double.tryParse(_monthlyBudgetController.text.trim());
+
+    if (dailyBudget == null || dailyBudget <= 0 ||
+        weeklyBudget == null || weeklyBudget <= 0 ||
+        monthlyBudget == null || monthlyBudget <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter valid positive numbers for daily, weekly, and monthly budgets'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+      return;
+    }
+
     setState(() => _isLoading = true);
 
     try {
@@ -94,17 +120,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           ? double.tryParse(_salaryController.text.trim())
           : null;
 
-      final double dailyBudget = double.tryParse(_dailyBudgetController.text.trim()) ?? 500;
-      final double weeklyBudget = double.tryParse(_weeklyBudgetController.text.trim()) ?? 3000;
-      final double monthlyBudget = double.tryParse(_monthlyBudgetController.text.trim()) ?? 12000;
-
       await _onboardingService.submitOnboarding(
         employmentStatus: _employmentStatus,
         monthlyIncome: monthlyIncome,
         dailyBudget: dailyBudget,
         weeklyBudget: weeklyBudget,
         monthlyBudget: monthlyBudget,
-        selectedBank: _selectedBank,
+        selectedBank: _selectedBank!,
       );
 
       if (!mounted) return;

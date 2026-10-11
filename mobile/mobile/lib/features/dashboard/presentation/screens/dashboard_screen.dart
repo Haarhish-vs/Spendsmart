@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:mobile/app/routes/route_names.dart';
 import 'package:mobile/app/theme/app_colors.dart';
 import 'package:mobile/app/theme/app_dimensions.dart';
 import 'package:mobile/app/theme/app_text_styles.dart';
@@ -24,16 +25,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   bool _isLoading = true;
   bool _isSyncingSms = false;
-  String _selectedBank = 'HDFC Bank';
+  String? _errorMessage;
+  String? _selectedBank;
   String? _userId;
 
-  // Summary state
+  // Real financial state retrieved directly from database
   double _todaySpent = 0;
   double _weekSpent = 0;
   double _monthSpent = 0;
-  double _dailyBudget = 500;
-  double _weeklyBudget = 3000;
-  double _monthlyBudget = 12000;
+  double _dailyBudget = 0;
+  double _weeklyBudget = 0;
+  double _monthlyBudget = 0;
   List<dynamic> _recentTransactions = [];
 
   bool _smsPermissionGranted = false;
@@ -46,10 +48,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _loadInitialData() async {
-    setState(() => _isLoading = true);
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
 
     _userId = await AppStorage.getUserId();
-    _selectedBank = await AppStorage.getSelectedBank() ?? 'HDFC Bank';
+    _selectedBank = await AppStorage.getSelectedBank();
     _smsPermissionGranted = await _smsParserService.hasSmsPermission();
 
     await _fetchSummary();
@@ -65,32 +70,83 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _fetchSummary() async {
+    // If userId not stored locally, attempt to initialize via backend
+    if (_userId == null) {
+      try {
+        final initRes = await ApiClient().get('/profile/init');
+        if (initRes is Map<String, dynamic> && initRes['data']?['id'] != null) {
+          _userId = initRes['data']['id'];
+          final bank = initRes['data']?['selected_bank'] ??
+              initRes['data']?['user_metadata']?['selected_bank'];
+          if (bank != null) {
+            _selectedBank = bank;
+            await AppStorage.setOnboarded(
+              userId: _userId!,
+              selectedBank: bank,
+              trackingStart: DateTime.now().toIso8601String(),
+              employmentStatus: 'employed',
+              dailyBudget: 0,
+              weeklyBudget: 0,
+              monthlyBudget: 0,
+            );
+          }
+        }
+      } catch (e) {
+        if (mounted) {
+          setState(() {
+            _errorMessage = 'Could not connect to SpendSmart backend. Tap to retry.';
+          });
+        }
+        return;
+      }
+    }
+
     if (_userId == null) return;
 
     try {
       final response = await _transactionService.getDashboardSummary(_userId!);
       if (response is Map<String, dynamic> && response['success'] == true) {
         final data = response['data'] as Map<String, dynamic>;
+
+        // Refresh selected bank from backend if available
+        final serverBank = data['selected_bank'] as String?;
+        if (serverBank != null && serverBank.isNotEmpty) {
+          _selectedBank = serverBank;
+        }
+
         if (mounted) {
           setState(() {
+            _errorMessage = null;
             _todaySpent = (data['today_spent'] as num?)?.toDouble() ?? 0.0;
             _weekSpent = (data['week_spent'] as num?)?.toDouble() ?? 0.0;
             _monthSpent = (data['month_spent'] as num?)?.toDouble() ?? 0.0;
-            _dailyBudget = (data['daily_budget'] as num?)?.toDouble() ?? 500.0;
-            _weeklyBudget = (data['weekly_budget'] as num?)?.toDouble() ?? 3000.0;
-            _monthlyBudget = (data['monthly_budget'] as num?)?.toDouble() ?? 12000.0;
+            _dailyBudget = (data['daily_budget'] as num?)?.toDouble() ?? 0.0;
+            _weeklyBudget = (data['weekly_budget'] as num?)?.toDouble() ?? 0.0;
+            _monthlyBudget = (data['monthly_budget'] as num?)?.toDouble() ?? 0.0;
             _recentTransactions = data['recent_transactions'] as List<dynamic>? ?? [];
           });
         }
+      } else {
+        if (mounted) {
+          setState(() {
+            _errorMessage = response['message'] ?? 'Failed to load financial data from server';
+          });
+        }
       }
-    } catch (_) {
-      // Handled gracefully
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _errorMessage = e.toString().replaceAll('Exception: ', '');
+        });
+      }
     }
   }
 
   Future<void> _promptSmsPermission() async {
     await Future.delayed(const Duration(milliseconds: 500));
     if (!mounted) return;
+
+    final bankDisplay = (_selectedBank != null && _selectedBank!.isNotEmpty) ? _selectedBank! : 'your selected bank';
 
     showDialog(
       context: context,
@@ -107,7 +163,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ],
         ),
         content: Text(
-          'SpendSmart uses bank SMS messages to automatically track your expenses. Only relevant debit transactions from your selected bank ($_selectedBank) will be processed.',
+          'SpendSmart uses bank SMS messages to automatically track your expenses. Only relevant debit transactions from $bankDisplay will be processed.',
           style: AppTextStyles.bodyMedium,
         ),
         actions: [
@@ -141,20 +197,144 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final count = await _smsParserService.syncInboxTransactions();
       await _fetchSummary();
 
-      if (mounted && count > 0) {
+      if (mounted) {
+        if (count > 0) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('$count new bank debit transaction(s) processed!'),
+              backgroundColor: AppColors.success,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('$count new bank transaction(s) processed!'),
-            backgroundColor: AppColors.success,
-            behavior: SnackBarBehavior.floating,
+            content: Text('Sync error: ${e.toString().replaceAll("Exception: ", "")}'),
+            backgroundColor: AppColors.error,
           ),
         );
       }
-    } catch (_) {
-      // Ignored
     } finally {
       if (mounted) setState(() => _isSyncingSms = false);
     }
+  }
+
+  void _showDiagnosticsModal() {
+    final diagnostics = _smsParserService.recentDiagnostics;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.6,
+        maxChildSize: 0.9,
+        minChildSize: 0.4,
+        expand: false,
+        builder: (_, scrollController) => Container(
+          padding: const EdgeInsets.all(AppDimensions.space20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('SMS Diagnostics', style: AppTextStyles.heading2),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded),
+                    onPressed: () => Navigator.pop(ctx),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Safe diagnostics showing why recent SMS messages were matched or rejected. No sensitive data is displayed.',
+                style: AppTextStyles.caption.copyWith(color: AppColors.textSecondary),
+              ),
+              const Divider(height: 24),
+              Expanded(
+                child: diagnostics.isEmpty
+                  ? const Center(
+                      child: Text(
+                        'No SMS sync events recorded yet.\nTap Sync icon on dashboard to scan.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: AppColors.textMuted),
+                      ),
+                    )
+                  : ListView.separated(
+                      controller: scrollController,
+                      itemCount: diagnostics.length,
+                      separatorBuilder: (_, index) => const Divider(height: 12),
+                      itemBuilder: (_, index) {
+                        final log = diagnostics[diagnostics.length - 1 - index]; // latest first
+                        final isSuccess = log.reasonCode == 'TRANSACTION_SAVED';
+                        final isDuplicate = log.reasonCode == 'DUPLICATE_TRANSACTION';
+                        final color = isSuccess
+                            ? AppColors.success
+                            : (isDuplicate ? Colors.orange : AppColors.error);
+
+                        return Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Icon(
+                              isSuccess
+                                  ? Icons.check_circle_outline
+                                  : (isDuplicate ? Icons.copy_rounded : Icons.cancel_outlined),
+                              color: color,
+                              size: 18,
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Text(
+                                        log.reasonCode,
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 12,
+                                          color: color,
+                                        ),
+                                      ),
+                                      Text(
+                                        DateFormat('hh:mm:ss a').format(log.timestamp),
+                                        style: AppTextStyles.caption,
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    log.safeMessage,
+                                    style: AppTextStyles.bodySmall,
+                                  ),
+                                  if (log.amount != null) ...[
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      'Amount: ${Formatters.currency(log.amount!)}',
+                                      style: AppTextStyles.caption.copyWith(fontWeight: FontWeight.w600),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -164,6 +344,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
       appBar: AppBar(
         title: const Text('SpendSmart'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.info_outline_rounded),
+            tooltip: 'SMS Diagnostics',
+            onPressed: _showDiagnosticsModal,
+          ),
           IconButton(
             icon: _isSyncingSms
                 ? const SizedBox(
@@ -190,6 +375,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // API Failure Banner
+                    if (_errorMessage != null) ...[
+                      _buildErrorBanner(),
+                      const SizedBox(height: 16),
+                    ],
+
                     // Bank Active Banner
                     _buildBankStatusBanner(),
                     const SizedBox(height: 16),
@@ -295,7 +486,43 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  Widget _buildErrorBanner() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.error.withAlpha(20),
+        borderRadius: BorderRadius.circular(AppDimensions.radiusMedium),
+        border: Border.all(color: AppColors.error.withAlpha(80)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.cloud_off_rounded, color: AppColors.error, size: 22),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              _errorMessage ?? 'Network error occurred',
+              style: AppTextStyles.bodySmall.copyWith(color: AppColors.error),
+            ),
+          ),
+          TextButton(
+            onPressed: () {
+              setState(() => _isLoading = true);
+              _fetchSummary().then((_) {
+                if (mounted) setState(() => _isLoading = false);
+              });
+            },
+            child: const Text('Retry', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildBankStatusBanner() {
+    final hasBank = _selectedBank != null && _selectedBank!.isNotEmpty;
+    final bankTitle = hasBank ? _selectedBank! : 'Not Selected';
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
@@ -312,24 +539,33 @@ class _DashboardScreenState extends State<DashboardScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Connected Bank: $_selectedBank',
+                  'Connected Bank: $bankTitle',
                   style: AppTextStyles.bodyMedium.copyWith(
                     fontWeight: FontWeight.w600,
                     color: AppColors.primary,
                   ),
                 ),
                 Text(
-                  _smsPermissionGranted
-                      ? 'Automated SMS debit sync active'
-                      : 'SMS permission needed for automated sync',
+                  !hasBank
+                      ? 'Please complete bank selection in onboarding'
+                      : (_smsPermissionGranted
+                          ? 'Automated SMS debit sync active'
+                          : 'SMS permission needed for automated sync'),
                   style: AppTextStyles.caption.copyWith(
-                    color: _smsPermissionGranted ? AppColors.success : AppColors.warning,
+                    color: !hasBank
+                        ? AppColors.error
+                        : (_smsPermissionGranted ? AppColors.success : AppColors.warning),
                   ),
                 ),
               ],
             ),
           ),
-          if (!_smsPermissionGranted)
+          if (!hasBank)
+            TextButton(
+              onPressed: () => Navigator.pushNamed(context, RouteNames.onboarding),
+              child: const Text('Set Bank'),
+            )
+          else if (!_smsPermissionGranted)
             TextButton(
               onPressed: _promptSmsPermission,
               child: const Text('Enable'),
@@ -340,6 +576,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildTodayExpenseCard() {
+    final hasBudget = _dailyBudget > 0;
+    final isExceeded = hasBudget && _todaySpent > _dailyBudget;
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(AppDimensions.space20),
@@ -395,15 +634,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
           Row(
             children: [
               Icon(
-                _todaySpent > _dailyBudget ? Icons.warning_rounded : Icons.check_circle_outline,
+                hasBudget
+                    ? (isExceeded ? Icons.warning_rounded : Icons.check_circle_outline)
+                    : Icons.info_outline,
                 size: 16,
-                color: _todaySpent > _dailyBudget ? Colors.amberAccent : Colors.lightGreenAccent,
+                color: hasBudget
+                    ? (isExceeded ? Colors.amberAccent : Colors.lightGreenAccent)
+                    : Colors.white70,
               ),
               const SizedBox(width: 6),
               Text(
-                _todaySpent > _dailyBudget
-                    ? 'Exceeded daily limit by ${Formatters.currency(_todaySpent - _dailyBudget)}'
-                    : '${Formatters.currency(_dailyBudget - _todaySpent)} remaining today',
+                hasBudget
+                    ? (isExceeded
+                        ? 'Exceeded daily limit by ${Formatters.currency(_todaySpent - _dailyBudget)}'
+                        : '${Formatters.currency(_dailyBudget - _todaySpent)} remaining today')
+                    : 'No daily budget limit set',
                 style: const TextStyle(color: Colors.white70, fontSize: 12),
               ),
             ],
@@ -419,15 +664,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
     required double budget,
     required IconData icon,
   }) {
-    final progress = budget > 0 ? (spent / budget).clamp(0.0, 1.0) : 0.0;
-    final isExceeded = spent > budget;
-    final isWarning = progress >= 0.8 && !isExceeded;
+    final hasBudget = budget > 0;
+    final progress = hasBudget ? (spent / budget).clamp(0.0, 1.0) : 0.0;
+    final isExceeded = hasBudget && spent > budget;
+    final isWarning = hasBudget && progress >= 0.8 && !isExceeded;
 
     Color statusColor = AppColors.success;
     if (isExceeded) {
       statusColor = AppColors.error;
     } else if (isWarning) {
       statusColor = AppColors.warning;
+    } else if (!hasBudget) {
+      statusColor = AppColors.textMuted;
     }
 
     return AppCard(
@@ -443,7 +691,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 child: Text(title, style: AppTextStyles.heading3),
               ),
               Text(
-                '${Formatters.currency(spent)} / ${Formatters.currency(budget)}',
+                hasBudget
+                    ? '${Formatters.currency(spent)} / ${Formatters.currency(budget)}'
+                    : '${Formatters.currency(spent)} (No limit set)',
                 style: AppTextStyles.bodyMedium.copyWith(
                   fontWeight: FontWeight.bold,
                   color: isExceeded ? AppColors.error : AppColors.textPrimary,
@@ -465,9 +715,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
           Align(
             alignment: Alignment.centerRight,
             child: Text(
-              isExceeded
-                  ? 'Over budget by ${(progress * 100).toStringAsFixed(0)}%'
-                  : '${(progress * 100).toStringAsFixed(0)}% used',
+              hasBudget
+                  ? (isExceeded
+                      ? 'Over budget by ${(progress * 100).toStringAsFixed(0)}%'
+                      : '${(progress * 100).toStringAsFixed(0)}% used')
+                  : 'Tap Budgets tab to set a limit',
               style: AppTextStyles.caption.copyWith(
                 color: statusColor,
                 fontWeight: FontWeight.w600,
@@ -481,13 +733,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Widget _buildRecentTransactionsList() {
     if (_recentTransactions.isEmpty) {
+      final bankDisplay = (_selectedBank != null && _selectedBank!.isNotEmpty) ? _selectedBank! : 'your selected bank';
+
       return AppCard(
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 24.0),
           child: EmptyState(
             icon: Icons.receipt_long_rounded,
             title: 'No transactions yet',
-            subtitle: 'Debit SMS from $_selectedBank will appear here automatically.',
+            subtitle: 'Debit SMS from $bankDisplay will appear here automatically.',
             action: OutlinedButton.icon(
               icon: const Icon(Icons.sync_rounded),
               label: const Text('Scan SMS Now'),
