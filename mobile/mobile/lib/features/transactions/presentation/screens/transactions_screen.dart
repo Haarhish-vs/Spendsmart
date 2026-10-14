@@ -8,6 +8,7 @@ import '../../../../core/network/api_client.dart';
 import '../../../../core/utils/app_storage.dart';
 import '../../models/category_model.dart';
 import '../../services/category_service.dart';
+import '../../services/sms_parser_service.dart';
 import '../../services/transaction_service.dart';
 
 class TransactionsScreen extends StatefulWidget {
@@ -20,10 +21,13 @@ class TransactionsScreen extends StatefulWidget {
 class _TransactionsScreenState extends State<TransactionsScreen> {
   final TransactionService _transactionService = TransactionService(ApiClient());
   final CategoryService _categoryService = CategoryService(ApiClient());
+  late final SmsParserService _smsParserService;
 
   final TextEditingController _searchController = TextEditingController();
 
   bool _isLoading = true;
+  bool _isSyncing = false;
+  String? _errorMessage;
   List<dynamic> _transactions = [];
   List<CategoryModel> _categories = [];
   String? _selectedCategoryName;
@@ -33,6 +37,7 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
   @override
   void initState() {
     super.initState();
+    _smsParserService = SmsParserService(_transactionService);
     _loadData();
   }
 
@@ -42,11 +47,45 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
     super.dispose();
   }
 
-  Future<void> _loadData() async {
-    setState(() => _isLoading = true);
+  Future<void> _loadData({bool syncSms = false}) async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
 
     try {
-      final userId = await AppStorage.getUserId();
+      String? userId = await AppStorage.getUserId();
+
+      // Resolve user from backend if missing from local storage
+      if (userId == null) {
+        try {
+          final initRes = await ApiClient().get('/profile/init');
+          if (initRes is Map<String, dynamic> && initRes['data']?['id'] != null) {
+            userId = initRes['data']['id'] as String;
+            await AppStorage.setUserId(userId);
+            final bank = initRes['data']?['selected_bank'] as String?;
+            if (bank != null) await AppStorage.setSelectedBank(bank);
+            final start = initRes['data']?['tracking_start'] as String?;
+            if (start != null) await AppStorage.setTrackingStartDate(start);
+          }
+        } catch (_) {}
+      }
+
+      if (syncSms) {
+        try {
+          final count = await _smsParserService.syncInboxTransactions();
+          if (count > 0 && mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('$count new bank transaction(s) synced!'),
+                backgroundColor: AppColors.success,
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+          }
+        } catch (_) {}
+      }
+
       final catList = await _categoryService.getCategories();
 
       if (userId != null) {
@@ -56,15 +95,28 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
             _categories = catList;
             if (res is Map<String, dynamic> && res['success'] == true) {
               _transactions = res['data'] as List<dynamic>? ?? [];
+              _errorMessage = null;
+            } else if (res is Map<String, dynamic> && res['message'] != null) {
+              _errorMessage = res['message'].toString();
             }
             _isLoading = false;
           });
         }
       } else {
-        if (mounted) setState(() => _isLoading = false);
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+            _errorMessage = 'Could not resolve user account. Tap to retry.';
+          });
+        }
       }
-    } catch (_) {
-      if (mounted) setState(() => _isLoading = false);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _errorMessage = e.toString().replaceAll('Exception: ', '');
+        });
+      }
     }
   }
 
@@ -182,6 +234,25 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
         backgroundColor: AppColors.surface,
         foregroundColor: AppColors.textPrimary,
         centerTitle: true,
+        actions: [
+          IconButton(
+            icon: _isSyncing
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary),
+                  )
+                : const Icon(Icons.sync_rounded),
+            tooltip: 'Sync Bank SMS',
+            onPressed: _isSyncing
+                ? null
+                : () async {
+                    setState(() => _isSyncing = true);
+                    await _loadData(syncSms: true);
+                    if (mounted) setState(() => _isSyncing = false);
+                  },
+          ),
+        ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () async {
@@ -194,6 +265,34 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
       ),
       body: Column(
         children: [
+          // Error Banner if API/network failed
+          if (_errorMessage != null)
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: AppDimensions.space16, vertical: 8),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.error.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(AppDimensions.radiusMedium),
+                border: Border.all(color: AppColors.error.withValues(alpha: 0.3)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.error_outline_rounded, color: AppColors.error, size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _errorMessage!,
+                      style: AppTextStyles.bodySmall.copyWith(color: AppColors.error),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () => _loadData(syncSms: true),
+                    child: const Text('Retry', style: TextStyle(fontWeight: FontWeight.bold)),
+                  ),
+                ],
+              ),
+            ),
+
           // Search & Filter Header
           Container(
             color: AppColors.surface,
@@ -295,26 +394,40 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator())
                 : displayed.isEmpty
-                    ? Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.receipt_long_outlined, size: 64, color: AppColors.textMuted.withValues(alpha: 0.5)),
-                            const SizedBox(height: 12),
-                            const Text('No transactions found', style: AppTextStyles.titleMedium),
-                            const SizedBox(height: 4),
-                            Text(
-                              _searchQuery.isNotEmpty || _selectedCategoryName != null
-                                  ? 'Try adjusting your filters'
-                                  : 'Transactions from bank SMS or manual entry will appear here',
-                              style: AppTextStyles.bodySmall.copyWith(color: AppColors.textMuted),
-                              textAlign: TextAlign.center,
+                    ? RefreshIndicator(
+                        onRefresh: () => _loadData(syncSms: true),
+                        child: LayoutBuilder(
+                          builder: (context, constraints) => SingleChildScrollView(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            child: ConstrainedBox(
+                              constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                              child: Center(
+                                child: Padding(
+                                  padding: const EdgeInsets.all(AppDimensions.space24),
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(Icons.receipt_long_outlined, size: 64, color: AppColors.textMuted.withValues(alpha: 0.5)),
+                                      const SizedBox(height: 12),
+                                      const Text('No transactions found', style: AppTextStyles.titleMedium),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        _searchQuery.isNotEmpty || _selectedCategoryName != null
+                                            ? 'Try adjusting your filters'
+                                            : 'Transactions from bank SMS or manual entry will appear here.\nPull down or tap sync to scan inbox SMS.',
+                                        style: AppTextStyles.bodySmall.copyWith(color: AppColors.textMuted),
+                                        textAlign: TextAlign.center,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
                             ),
-                          ],
+                          ),
                         ),
                       )
                     : RefreshIndicator(
-                        onRefresh: _loadData,
+                        onRefresh: () => _loadData(syncSms: true),
                         child: ListView.separated(
                           padding: const EdgeInsets.all(AppDimensions.space16),
                           itemCount: displayed.length,

@@ -1,5 +1,6 @@
 const supabase = require('../config/supabase');
 const profileRepository = require('./profile.repository');
+const dateUtils = require('../utils/date');
 
 class AnalyticsRepository {
   /**
@@ -28,22 +29,29 @@ class AnalyticsRepository {
       trackingStart = userData?.user?.user_metadata?.tracking_start || null;
     } catch (_) {}
 
-    const trackingStartIso = trackingStart ? new Date(trackingStart).toISOString() : null;
+    // Normalize tracking_start to start of that calendar day in Asia/Kolkata
+    const trackingDayStart = trackingStart
+      ? dateUtils.getDailyBoundaries(new Date(trackingStart)).start
+      : null;
+
     const transactions = (allTxs || []).filter((tx) => {
-      if (!trackingStartIso) return true;
-      return new Date(tx.transaction_date).toISOString() >= trackingStartIso;
+      if (!trackingDayStart) return true;
+      return new Date(tx.transaction_date).toISOString() >= trackingDayStart;
     });
 
-    // Date ranges
+    // Date ranges in Asia/Kolkata
     const now = new Date();
 
-    // Current month window
-    const startOfCurrentMonth = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0);
-    const endOfCurrentMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    // Current month window in Asia/Kolkata
+    const { start: startOfCurrentMonthStr, end: endOfCurrentMonthStr } = dateUtils.getMonthlyBoundaries(now);
+    const startOfCurrentMonth = new Date(startOfCurrentMonthStr);
+    const endOfCurrentMonth = new Date(endOfCurrentMonthStr);
 
     // Last month window
-    const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0);
-    const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+    const lastMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 15);
+    const { start: startOfLastMonthStr, end: endOfLastMonthStr } = dateUtils.getMonthlyBoundaries(lastMonthDate);
+    const startOfLastMonth = new Date(startOfLastMonthStr);
+    const endOfLastMonth = new Date(endOfLastMonthStr);
 
     let currentMonthExpense = 0;
     let currentMonthIncome = 0;
@@ -52,8 +60,8 @@ class AnalyticsRepository {
     const categoryMap = {};
 
     // 7 Days of current week (Mon-Sun)
-    const dayOfWeek = (now.getDay() + 6) % 7;
-    const startOfWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dayOfWeek, 0, 0, 0);
+    const { start: startOfWeekStr } = dateUtils.getWeeklyBoundaries(now);
+    const startOfWeek = new Date(startOfWeekStr);
     const weeklyData = [
       { day: 'Mon', amount: 0, date: '' },
       { day: 'Tue', amount: 0, date: '' },

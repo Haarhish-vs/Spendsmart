@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_sms_inbox/flutter_sms_inbox.dart';
 import 'package:permission_handler/permission_handler.dart';
+import '../../../core/network/api_client.dart';
 import '../../../core/utils/app_storage.dart';
 import 'bank_matching_service.dart';
 import 'transaction_service.dart';
@@ -443,14 +444,47 @@ class SmsParserService {
       return 0;
     }
 
-    final selectedBank = await AppStorage.getSelectedBank();
+    String? selectedBank = await AppStorage.getSelectedBank();
+    String? userId = await AppStorage.getUserId();
+    DateTime? storedTrackingStart = await AppStorage.getTrackingStartDate();
+
+    // Fallback: If bank or user not in local storage, attempt to sync from /profile/init
+    if (selectedBank == null || selectedBank.trim().isEmpty || userId == null) {
+      try {
+        final client = ApiClient();
+        final initRes = await client.get('/profile/init');
+        if (initRes is Map<String, dynamic> && initRes['data'] != null) {
+          final data = initRes['data'] as Map<String, dynamic>;
+          final fetchedUserId = data['id'] as String?;
+          final fetchedBank = data['selected_bank'] as String?;
+          final fetchedStart = data['tracking_start'] as String?;
+
+          if (fetchedUserId != null) {
+            userId = fetchedUserId;
+            await AppStorage.setUserId(fetchedUserId);
+          }
+          if (fetchedBank != null && fetchedBank.isNotEmpty) {
+            selectedBank = fetchedBank;
+            await AppStorage.setSelectedBank(fetchedBank);
+          }
+          if (fetchedStart != null) {
+            storedTrackingStart = DateTime.tryParse(fetchedStart);
+            await AppStorage.setTrackingStartDate(fetchedStart);
+          }
+        }
+      } catch (e) {
+        debugPrint('[SpendSmart SMS] Profile init fallback error: $e');
+      }
+    }
+
     if (selectedBank == null || selectedBank.trim().isEmpty) {
       _logDiagnostic('SELECTED_BANK_MISSING', 'Cannot sync inbox: User has not selected a bank in onboarding');
       return 0;
     }
 
-    final trackingStart = await AppStorage.getTrackingStartDate() ?? DateTime.now().subtract(const Duration(days: 30));
-    final userId = await AppStorage.getUserId();
+    final trackingStart = storedTrackingStart ?? DateTime.now().subtract(const Duration(days: 30));
+    // Normalize to beginning of the tracking day (00:00:00) so same-day transactions are preserved
+    final trackingDayStart = DateTime(trackingStart.year, trackingStart.month, trackingStart.day);
 
     // Fetch messages from inbox
     List<SmsMessage> messages = [];
@@ -467,7 +501,7 @@ class SmsParserService {
     int savedCount = 0;
 
     for (final msg in messages) {
-      final parsed = parseSms(msg, selectedBank, trackingStart);
+      final parsed = parseSms(msg, selectedBank, trackingDayStart);
       if (parsed != null) {
         try {
           final res = await transactionService.createTransaction({

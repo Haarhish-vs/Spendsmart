@@ -1,5 +1,6 @@
 const supabase = require('../config/supabase');
 const profileRepository = require('./profile.repository');
+const dateUtils = require('../utils/date');
 
 class TransactionRepository {
   /**
@@ -188,20 +189,14 @@ class TransactionRepository {
     }
 
     const now = new Date();
-    // Start and end of today in local calendar
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0).toISOString();
-    const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).toISOString();
+    // Daily boundary in Asia/Kolkata
+    const { start: startOfToday, end: endOfToday } = dateUtils.getDailyBoundaries(now);
+    // Weekly boundary (Monday to Sunday) in Asia/Kolkata
+    const { start: startOfWeek, end: endOfWeek } = dateUtils.getWeeklyBoundaries(now);
+    // Monthly boundary (1st to last day) in Asia/Kolkata
+    const { start: startOfMonth, end: endOfMonth } = dateUtils.getMonthlyBoundaries(now);
 
-    // Start and end of current week (Monday to Sunday)
-    const dayOfWeek = (now.getDay() + 6) % 7; // 0 for Monday, 6 for Sunday
-    const startOfWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dayOfWeek, 0, 0, 0).toISOString();
-    const endOfWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() + (6 - dayOfWeek), 23, 59, 59, 999).toISOString();
-
-    // Start and end of current month
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0).toISOString();
-    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999).toISOString();
-
-    // Fetch transactions
+    // Fetch user expense transactions
     const { data: allTxs, error: txErr } = await supabase
       .from('transactions')
       .select('*, categories(id, name, icon)')
@@ -220,13 +215,17 @@ class TransactionRepository {
       trackingStart = userData?.user?.user_metadata?.tracking_start || null;
     } catch (_) {}
 
-    const trackingStartIso = trackingStart ? new Date(trackingStart).toISOString() : null;
+    // Normalize tracking_start to start of that calendar day in Asia/Kolkata
+    const trackingDayStart = trackingStart
+      ? dateUtils.getDailyBoundaries(new Date(trackingStart)).start
+      : null;
+
     const eligibleTransactions = (allTxs || []).filter((tx) => {
-      if (!trackingStartIso) return true;
-      return new Date(tx.transaction_date).toISOString() >= trackingStartIso;
+      if (!trackingDayStart) return true;
+      return new Date(tx.transaction_date).toISOString() >= trackingDayStart;
     });
 
-    // Compute spent sums from eligible transactions only
+    // Compute spent sums from eligible expense transactions only
     let todaySpent = 0;
     let weekSpent = 0;
     let monthSpent = 0;
@@ -258,6 +257,14 @@ class TransactionRepository {
     const weeklyBudget = budgets?.find((b) => b.period === 'weekly')?.amount ?? 0;
     const monthlyBudget = budgets?.find((b) => b.period === 'monthly')?.amount ?? 0;
 
+    const todayRemaining = Math.max(0, dailyBudget - todaySpent);
+    const weekRemaining = Math.max(0, weeklyBudget - weekSpent);
+    const monthRemaining = Math.max(0, monthlyBudget - monthSpent);
+
+    const todayPercent = dailyBudget > 0 ? Number(((todaySpent / dailyBudget) * 100).toFixed(1)) : 0;
+    const weekPercent = weeklyBudget > 0 ? Number(((weekSpent / weeklyBudget) * 100).toFixed(1)) : 0;
+    const monthPercent = monthlyBudget > 0 ? Number(((monthSpent / monthlyBudget) * 100).toFixed(1)) : 0;
+
     return {
       user_id: userId,
       selected_bank: selectedBank,
@@ -267,6 +274,12 @@ class TransactionRepository {
       daily_budget: dailyBudget,
       weekly_budget: weeklyBudget,
       monthly_budget: monthlyBudget,
+      today_remaining: todayRemaining,
+      week_remaining: weekRemaining,
+      month_remaining: monthRemaining,
+      today_percent: todayPercent,
+      week_percent: weekPercent,
+      month_percent: monthPercent,
       recent_transactions: eligibleTransactions.slice(0, 10),
     };
   }

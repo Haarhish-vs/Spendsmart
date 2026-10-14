@@ -1,5 +1,6 @@
 const supabase = require('../config/supabase');
 const profileRepository = require('./profile.repository');
+const dateUtils = require('../utils/date');
 
 class BudgetRepository {
   /**
@@ -37,23 +38,23 @@ class BudgetRepository {
       trackingStart = userData?.user?.user_metadata?.tracking_start || null;
     } catch (_) {}
 
-    const trackingStartIso = trackingStart ? new Date(trackingStart).toISOString() : null;
+    // Normalize tracking_start to start of that calendar day in Asia/Kolkata
+    const trackingDayStart = trackingStart
+      ? dateUtils.getDailyBoundaries(new Date(trackingStart)).start
+      : null;
+
     const allTx = (transactions || []).filter((tx) => {
-      if (!trackingStartIso) return true;
-      return new Date(tx.transaction_date).toISOString() >= trackingStartIso;
+      if (!trackingDayStart) return true;
+      return new Date(tx.transaction_date).toISOString() >= trackingDayStart;
     });
 
     const now = new Date();
-
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0).toISOString();
-    const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).toISOString();
-
-    const dayOfWeek = (now.getDay() + 6) % 7;
-    const startOfWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dayOfWeek, 0, 0, 0).toISOString();
-    const endOfWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() + (6 - dayOfWeek), 23, 59, 59, 999).toISOString();
-
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0).toISOString();
-    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999).toISOString();
+    // Daily boundary in Asia/Kolkata
+    const { start: startOfToday, end: endOfToday } = dateUtils.getDailyBoundaries(now);
+    // Weekly boundary (Monday to Sunday) in Asia/Kolkata
+    const { start: startOfWeek, end: endOfWeek } = dateUtils.getWeeklyBoundaries(now);
+    // Monthly boundary (1st to last day) in Asia/Kolkata
+    const { start: startOfMonth, end: endOfMonth } = dateUtils.getMonthlyBoundaries(now);
 
     const results = [];
 
@@ -82,22 +83,14 @@ class BudgetRepository {
       const remainingAmount = Math.max(0, budgetAmount - spent);
 
       let status = 'safe';
-      let alertType = null;
-      if (percentageUsed >= 100) {
+      if (percentageUsed > 100) {
         status = 'exceeded';
-        alertType = 'exceeded';
+      } else if (percentageUsed >= 100) {
+        status = 'limit_reached';
       } else if (percentageUsed >= 80) {
         status = 'warning';
-        alertType = 'warning';
-      }
-
-      // Check and record alert if needed
-      if (alertType) {
-        const thresholdPercent = alertType === 'exceeded' ? 100 : 80;
-        const msg = `${b.name || 'Budget'} ${alertType === 'exceeded' ? 'exceeded' : 'reached 80%'}: ₹${spent.toFixed(0)} of ₹${budgetAmount.toFixed(0)}`;
-        
-        // Trigger alert recording (non-blocking)
-        this._recordAlertIfNew(userId, b.id, thresholdPercent, alertType, spent, budgetAmount, msg).catch(() => {});
+      } else if (percentageUsed >= 50) {
+        status = 'halfway';
       }
 
       results.push({

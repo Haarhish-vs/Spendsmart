@@ -7,44 +7,66 @@ class ProfileRepository {
    * @returns {Promise<Object>}
    */
   async getOrCreateUser(userId) {
-    if (userId) {
-      const { data: existingProfile } = await supabase
+    let resolvedUserId = userId;
+    let existingProfile = null;
+
+    if (resolvedUserId) {
+      const { data } = await supabase
         .from('profiles')
         .select('*')
-        .eq('id', userId)
+        .eq('id', resolvedUserId)
         .maybeSingle();
-
-      if (existingProfile) return existingProfile;
+      existingProfile = data;
     }
 
-    // Check if default user exists in auth
-    const defaultEmail = 'user@spendsmart.app';
-    const { data: usersData } = await supabase.auth.admin.listUsers();
-    let user = usersData && usersData.users ? usersData.users.find((u) => u.email === defaultEmail) : null;
+    if (!existingProfile) {
+      const defaultEmail = 'user@spendsmart.app';
+      const { data: usersData } = await supabase.auth.admin.listUsers();
+      let user = usersData && usersData.users ? usersData.users.find((u) => u.email === defaultEmail) : null;
 
-    if (!user) {
-      const { data, error } = await supabase.auth.admin.createUser({
-        email: defaultEmail,
-        password: 'SpendSmartPassword123!',
-        email_confirm: true,
-      });
-      if (error) throw error;
-      user = data.user;
+      if (!user) {
+        const { data, error } = await supabase.auth.admin.createUser({
+          email: defaultEmail,
+          password: 'SpendSmartPassword123!',
+          email_confirm: true,
+        });
+        if (error) throw error;
+        user = data.user;
+      }
+
+      resolvedUserId = user.id;
+
+      // Upsert into profiles
+      const { data: profile, error: pErr } = await supabase
+        .from('profiles')
+        .upsert({
+          id: resolvedUserId,
+          full_name: 'SpendSmart User',
+          currency_code: 'INR',
+        })
+        .select()
+        .single();
+
+      if (pErr) throw pErr;
+      existingProfile = profile;
+    } else {
+      resolvedUserId = existingProfile.id;
     }
 
-    // Upsert into profiles
-    const { data: profile, error: pErr } = await supabase
-      .from('profiles')
-      .upsert({
-        id: user.id,
-        full_name: 'SpendSmart User',
-        currency_code: 'INR',
-      })
-      .select()
-      .single();
+    // Retrieve selected_bank & metadata from auth.users
+    let metadata = {};
+    try {
+      const { data: userData } = await supabase.auth.admin.getUserById(resolvedUserId);
+      metadata = userData?.user?.user_metadata || {};
+    } catch (_) {}
 
-    if (pErr) throw pErr;
-    return profile;
+    return {
+      ...existingProfile,
+      selected_bank: metadata.selected_bank || null,
+      tracking_start: metadata.tracking_start || null,
+      employment_status: metadata.employment_status || null,
+      user_metadata: metadata,
+    };
   }
 
   /**

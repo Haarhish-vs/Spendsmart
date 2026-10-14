@@ -12,29 +12,29 @@ class BudgetAlertService {
       percentage: 50,
       alertType: 'halfway',
       title: 'Budget Update',
-      getBody: (period, spent, total) =>
-        `You've used 50% of your ${period} budget (₹${Math.round(spent)} / ₹${Math.round(total)}). Keep tracking your spending.`,
+      getBody: (period) =>
+        `You've used 50% of your ${period} budget. Keep tracking your spending.`,
     },
     {
       percentage: 80,
       alertType: 'warning',
       title: 'Budget Warning',
-      getBody: (period, spent, total) =>
-        `You've used 80% of your ${period} budget (₹${Math.round(spent)} / ₹${Math.round(total)}). Watch your remaining spending.`,
+      getBody: (period) =>
+        `You've used 80% of your ${period} budget. Watch your remaining budget.`,
     },
     {
       percentage: 100,
       alertType: 'limit_reached',
       title: 'Budget Limit Reached',
-      getBody: (period, spent, total) =>
-        `You've used your entire ${period} budget of ₹${Math.round(total)}.`,
+      getBody: (period) =>
+        `You've used your entire ${period} budget.`,
     },
     {
       percentage: 101, // Represents > 100%
       alertType: 'exceeded',
       title: 'Budget Exceeded',
-      getBody: (period, spent, total) =>
-        `You've exceeded your ${period} budget (Spent: ₹${Math.round(spent)} vs Limit: ₹${Math.round(total)}). Review your recent expenses.`,
+      getBody: (period) =>
+        `You've exceeded your ${period} spending budget. Review your recent expenses.`,
     },
   ];
 

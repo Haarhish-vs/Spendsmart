@@ -50,6 +50,26 @@ class AppStorage {
     return prefs.getString(keySelectedBank);
   }
 
+  static Future<void> setUserId(String userId) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(keyUserId, userId);
+  }
+
+  static Future<void> setSelectedBank(String selectedBank) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(keySelectedBank, selectedBank);
+  }
+
+  static Future<void> setTrackingStartDate(String trackingStart) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(keyTrackingStart, trackingStart);
+  }
+
+  static Future<void> setIsOnboarded(bool onboarded) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(keyIsOnboarded, onboarded);
+  }
+
   static Future<DateTime?> getTrackingStartDate() async {
     final prefs = await SharedPreferences.getInstance();
     final str = prefs.getString(keyTrackingStart);

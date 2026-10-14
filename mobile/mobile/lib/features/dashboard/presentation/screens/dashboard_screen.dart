@@ -75,21 +75,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
       try {
         final initRes = await ApiClient().get('/profile/init');
         if (initRes is Map<String, dynamic> && initRes['data']?['id'] != null) {
-          _userId = initRes['data']['id'];
-          final bank = initRes['data']?['selected_bank'] ??
-              initRes['data']?['user_metadata']?['selected_bank'];
-          if (bank != null) {
+          _userId = initRes['data']['id'] as String;
+          await AppStorage.setUserId(_userId!);
+
+          final bank = (initRes['data']?['selected_bank'] ??
+              initRes['data']?['user_metadata']?['selected_bank']) as String?;
+          if (bank != null && bank.isNotEmpty) {
             _selectedBank = bank;
-            await AppStorage.setOnboarded(
-              userId: _userId!,
-              selectedBank: bank,
-              trackingStart: DateTime.now().toIso8601String(),
-              employmentStatus: 'employed',
-              dailyBudget: 0,
-              weeklyBudget: 0,
-              monthlyBudget: 0,
-            );
+            await AppStorage.setSelectedBank(bank);
           }
+
+          final tracking = (initRes['data']?['tracking_start'] ??
+              initRes['data']?['user_metadata']?['tracking_start']) as String?;
+          if (tracking != null && tracking.isNotEmpty) {
+            await AppStorage.setTrackingStartDate(tracking);
+          }
+
+          await AppStorage.setIsOnboarded(true);
         }
       } catch (e) {
         if (mounted) {
@@ -112,6 +114,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         final serverBank = data['selected_bank'] as String?;
         if (serverBank != null && serverBank.isNotEmpty) {
           _selectedBank = serverBank;
+          await AppStorage.setSelectedBank(serverBank);
         }
 
         if (mounted) {
