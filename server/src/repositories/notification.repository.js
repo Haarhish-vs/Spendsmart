@@ -77,12 +77,25 @@ class NotificationRepository {
   /**
    * Create an in-app notification entry in the notifications table
    */
-  async createNotification({ userId, notificationType = 'budget_threshold', title, message, relatedBudgetId = null }) {
+  async createNotification({ userId, notificationType = 'budget_warning', title, message, relatedBudgetId = null }) {
     if (!userId || !title || !message) return null;
+
+    // Validate and sanitize notification_type against DB constraint: ('budget_warning', 'budget_exceeded', 'general')
+    const allowedTypes = ['budget_warning', 'budget_exceeded', 'general'];
+    let safeType = notificationType;
+    if (!allowedTypes.includes(safeType)) {
+      if (safeType === 'budget_threshold' || safeType === 'budget_alert' || safeType === 'warning') {
+        safeType = 'budget_warning';
+      } else if (safeType === 'exceeded' || safeType === 'over_budget') {
+        safeType = 'budget_exceeded';
+      } else {
+        safeType = 'general';
+      }
+    }
 
     const payload = {
       user_id: userId,
-      notification_type: notificationType,
+      notification_type: safeType,
       title,
       message,
       is_read: false,

@@ -11,6 +11,9 @@ class BudgetAlertService {
     {
       percentage: 50,
       alertType: 'halfway',
+      notificationType: 'budget_warning',
+      dbThreshold: null, // Omit from budget_alerts table due to DB check constraint (80, 100)
+      dbAlertType: null,
       title: 'Budget Update',
       getBody: (period) =>
         `You've used 50% of your ${period} budget. Keep tracking your spending.`,
@@ -18,6 +21,9 @@ class BudgetAlertService {
     {
       percentage: 80,
       alertType: 'warning',
+      notificationType: 'budget_warning',
+      dbThreshold: 80,
+      dbAlertType: 'warning',
       title: 'Budget Warning',
       getBody: (period) =>
         `You've used 80% of your ${period} budget. Watch your remaining budget.`,
@@ -25,6 +31,9 @@ class BudgetAlertService {
     {
       percentage: 100,
       alertType: 'limit_reached',
+      notificationType: 'budget_warning',
+      dbThreshold: 100,
+      dbAlertType: 'critical',
       title: 'Budget Limit Reached',
       getBody: (period) =>
         `You've used your entire ${period} budget.`,
@@ -32,6 +41,9 @@ class BudgetAlertService {
     {
       percentage: 101, // Represents > 100%
       alertType: 'exceeded',
+      notificationType: 'budget_exceeded',
+      dbThreshold: 100,
+      dbAlertType: 'exceeded',
       title: 'Budget Exceeded',
       getBody: (period) =>
         `You've exceeded your ${period} spending budget. Review your recent expenses.`,
@@ -156,18 +168,49 @@ class BudgetAlertService {
 
       for (const t of crossedThresholds) {
         // 5. Prevent Duplicate Notifications in this period
-        const { data: existingAlert } = await supabase
-          .from('budget_alerts')
-          .select('id')
-          .eq('budget_id', budget.id)
-          .eq('user_id', userId)
-          .eq('threshold_percent', t.percentage)
-          .gte('created_at', start)
-          .lte('created_at', end)
-          .maybeSingle();
+        let alreadyNotified = false;
 
-        if (existingAlert) {
-          // Already notified for this exact calendar period and threshold
+        // Check budget_alerts if threshold maps to database
+        if (t.dbThreshold && t.dbAlertType) {
+          try {
+            const { data: existingAlert } = await supabase
+              .from('budget_alerts')
+              .select('id')
+              .eq('budget_id', budget.id)
+              .eq('user_id', userId)
+              .eq('threshold_percent', t.dbThreshold)
+              .eq('alert_type', t.dbAlertType)
+              .gte('created_at', start)
+              .lte('created_at', end)
+              .maybeSingle();
+
+            if (existingAlert) {
+              alreadyNotified = true;
+            }
+          } catch (_) {}
+        }
+
+        // Also check notifications table (covers 50%, 80%, 100%, >100%)
+        if (!alreadyNotified) {
+          try {
+            const { data: existingNotif } = await supabase
+              .from('notifications')
+              .select('id')
+              .eq('user_id', userId)
+              .eq('related_budget_id', budget.id)
+              .eq('title', t.title)
+              .gte('created_at', start)
+              .lte('created_at', end)
+              .maybeSingle();
+
+            if (existingNotif) {
+              alreadyNotified = true;
+            }
+          } catch (_) {}
+        }
+
+        if (alreadyNotified) {
+          console.log(`[BudgetAlert] Suppressing duplicate notification for user ${userId}, budget ${budget.id}, threshold ${t.percentage}%`);
           continue;
         }
 
@@ -178,56 +221,68 @@ class BudgetAlertService {
         const title = t.title;
         const body = t.getBody(periodLabel, totalSpent, budgetAmount);
 
-        // 6. Record in budget_alerts table
-        const { data: alertRecord, error: aErr } = await supabase
-          .from('budget_alerts')
-          .insert([{
-            budget_id: budget.id,
-            user_id: userId,
-            threshold_percent: t.percentage,
-            alert_type: t.alertType,
-            spent_amount: totalSpent,
-            budget_amount: budgetAmount,
-            message: body,
-          }])
-          .select()
-          .single();
-
-        if (aErr) {
-          console.error(`Error saving budget_alert for budget ${budget.id}:`, aErr.message);
-          continue;
+        // 6. Record in budget_alerts table (safe insert, non-blocking)
+        if (t.dbThreshold && t.dbAlertType) {
+          try {
+            await supabase
+              .from('budget_alerts')
+              .insert([{
+                budget_id: budget.id,
+                user_id: userId,
+                threshold_percent: t.dbThreshold,
+                alert_type: t.dbAlertType,
+                spent_amount: totalSpent,
+                budget_amount: budgetAmount,
+                message: body,
+              }]);
+          } catch (aErr) {
+            console.warn(`[BudgetAlert] Non-fatal budget_alerts insert note: ${aErr.message}`);
+          }
         }
 
-        // 7. Record in notifications history table
-        await notificationRepository.createNotification({
-          userId,
-          notificationType: 'budget_threshold',
-          title,
-          message: body,
-          relatedBudgetId: budget.id,
-        });
+        // 7. Record in notifications history table (safe insert, non-blocking)
+        try {
+          await notificationRepository.createNotification({
+            userId,
+            notificationType: t.notificationType || 'budget_warning',
+            title,
+            message: body,
+            relatedBudgetId: budget.id,
+          });
+        } catch (nErr) {
+          console.warn(`[BudgetAlert] Non-fatal notifications insert note: ${nErr.message}`);
+        }
 
         // 8. Deliver FCM Push Notification for this crossed threshold
         let pushResult = null;
-        const tokens = await notificationRepository.getActiveTokensForUser(userId);
-        if (tokens && tokens.length > 0) {
-          pushResult = await fcmService.sendPushNotification({
-            tokens,
-            title,
-            body,
-            data: {
-              notification_type: 'budget_threshold',
-              budget_id: budget.id,
-              period: budget.period,
-              threshold: String(t.percentage),
-              route: '/budgets',
-            },
-          });
+        try {
+          const tokens = await notificationRepository.getActiveTokensForUser(userId);
+          console.log(`[BudgetAlert] Delivering FCM push to ${tokens.length} token(s) for user ${userId}: "${title}" - "${body}"`);
+          if (tokens && tokens.length > 0) {
+            pushResult = await fcmService.sendPushNotification({
+              tokens,
+              title,
+              body,
+              data: {
+                notification_type: t.notificationType || 'budget_warning',
+                budget_id: budget.id,
+                period: budget.period,
+                threshold: String(t.percentage),
+                route: '/budgets',
+              },
+            });
 
-          // Cleanup invalid tokens if any detected
-          if (pushResult && pushResult.invalidTokens && pushResult.invalidTokens.length > 0) {
-            await notificationRepository.deactivateTokens(pushResult.invalidTokens);
+            console.log(`[BudgetAlert] FCM push result for budget ${budget.id}:`, pushResult);
+
+            // Cleanup invalid tokens if any detected
+            if (pushResult && pushResult.invalidTokens && pushResult.invalidTokens.length > 0) {
+              await notificationRepository.deactivateTokens(pushResult.invalidTokens);
+            }
+          } else {
+            console.warn(`[BudgetAlert] No active device tokens found for user ${userId}. Push skipped.`);
           }
+        } catch (pushErr) {
+          console.error(`[BudgetAlert] FCM push delivery failed (non-fatal):`, pushErr.message);
         }
 
         results.push({
