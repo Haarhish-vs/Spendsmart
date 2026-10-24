@@ -30,9 +30,9 @@ class OnboardingService {
     final response = await apiClient.post('/profile/onboarding', payload);
 
     if (response is Map<String, dynamic> && response['success'] == true) {
-      final data = response['data'] as Map<String, dynamic>;
-      final profile = data['profile'] as Map<String, dynamic>;
-      final userId = profile['id'] as String;
+      final data = (response['data'] as Map<String, dynamic>?) ?? {};
+      final profile = (data['profile'] as Map<String, dynamic>?) ?? {};
+      final userId = (profile['id'] ?? data['userId'] ?? data['user_id'] ?? '').toString();
 
       // Save locally
       await AppStorage.setOnboarded(

@@ -69,24 +69,30 @@ class ApiClient {
   }
 
   Future<dynamic> _executeWithFallback(Future<http.Response> Function(String url) requestFn) async {
+    http.Response? response;
+
     // Try currently active URL first (allow up to 30s for Render cold-starts / cellular latency)
     try {
-      final response = await requestFn(activeBaseUrl).timeout(const Duration(seconds: 30));
-      return _handleResponse(response);
-    } catch (e) {
+      response = await requestFn(activeBaseUrl).timeout(const Duration(seconds: 30));
+    } catch (_) {
       // If network failure / connection refused on production, try alternate local candidates if available
       for (final candidate in candidateBaseUrls) {
         if (candidate == activeBaseUrl) continue;
         try {
-          final response = await requestFn(candidate).timeout(const Duration(seconds: 5));
+          response = await requestFn(candidate).timeout(const Duration(seconds: 5));
           activeBaseUrl = candidate; // Remember working candidate
-          return _handleResponse(response);
+          break;
         } catch (_) {
           continue;
         }
       }
+    }
+
+    if (response == null) {
       throw Exception('Could not connect to SpendSmart backend ($activeBaseUrl). Please check your internet connection and try again.');
     }
+
+    return _handleResponse(response);
   }
 
   dynamic _handleResponse(http.Response response) {

@@ -130,7 +130,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       );
 
       if (!mounted) return;
-      Navigator.pushReplacementNamed(context, RouteNames.home);
+      Navigator.pushNamedAndRemoveUntil(context, RouteNames.home, (route) => false);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

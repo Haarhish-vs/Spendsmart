@@ -93,21 +93,50 @@ class ProfileRepository {
       tracking_start,
     } = data;
 
-    // 1. Update profiles table
-    const { data: profile, error: profileErr } = await supabase
-      .from('profiles')
-      .update({
-        monthly_income: monthly_income !== null && monthly_income !== undefined ? Number(monthly_income) : null,
-        selected_bank: selected_bank || null,
-        tracking_start: tracking_start || null,
-        employment_status: employment_status || null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', userId)
-      .select()
-      .single();
+    // 1. Update profiles table safely with existing columns
+    const profileUpdate = {
+      updated_at: new Date().toISOString(),
+    };
+    if (monthly_income !== null && monthly_income !== undefined) {
+      profileUpdate.monthly_income = Number(monthly_income);
+    }
 
-    if (profileErr) throw profileErr;
+    let { data: profile, error: profileErr } = await supabase
+      .from('profiles')
+      .update(profileUpdate)
+      .eq('id', userId)
+      .select('*')
+      .maybeSingle();
+
+    if (profileErr) {
+      console.warn('Could not update profiles table:', profileErr.message);
+    }
+
+    // Attempt optional columns if schema migration was run, but never throw if it fails
+    try {
+      const extraUpdate = {};
+      if (selected_bank !== undefined) extraUpdate.selected_bank = selected_bank || null;
+      if (tracking_start !== undefined) extraUpdate.tracking_start = tracking_start || null;
+      if (employment_status !== undefined) extraUpdate.employment_status = employment_status || null;
+      if (Object.keys(extraUpdate).length > 0) {
+        const { data: updatedExtra } = await supabase
+          .from('profiles')
+          .update(extraUpdate)
+          .eq('id', userId)
+          .select('*')
+          .maybeSingle();
+        if (updatedExtra) profile = updatedExtra;
+      }
+    } catch (_) {}
+
+    // Ensure profile has an id
+    const resolvedProfile = {
+      ...(profile || {}),
+      id: profile?.id || userId,
+      selected_bank: selected_bank || null,
+      tracking_start: tracking_start || null,
+      employment_status: employment_status || null,
+    };
 
     // 2. Persist selected_bank, tracking_start, and employment_status in Supabase Auth user_metadata
     try {
@@ -168,19 +197,14 @@ class ProfileRepository {
       const { data: budgets, error: budgetErr } = await supabase
         .from('budgets')
         .insert(budgetsToInsert)
-        .select();
+        .select('*');
 
       if (budgetErr) throw budgetErr;
       insertedBudgets = budgets;
     }
 
     return {
-      profile: {
-        ...profile,
-        selected_bank: selected_bank || null,
-        tracking_start: tracking_start || null,
-        employment_status: employment_status || null,
-      },
+      profile: resolvedProfile,
       budgets: insertedBudgets,
       selected_bank: selected_bank || null,
       employment_status: employment_status || null,

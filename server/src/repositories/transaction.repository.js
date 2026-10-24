@@ -211,7 +211,7 @@ class TransactionRepository {
     try {
       const { data: profile } = await supabase
         .from('profiles')
-        .select('selected_bank, tracking_start')
+        .select('*')
         .eq('id', userId)
         .maybeSingle();
 

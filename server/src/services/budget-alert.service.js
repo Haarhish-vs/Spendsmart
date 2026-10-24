@@ -108,7 +108,7 @@ class BudgetAlertService {
       try {
         const { data: profile } = await supabase
           .from('profiles')
-          .select('tracking_start')
+          .select('*')
           .eq('id', userId)
           .maybeSingle();
 
