@@ -17,7 +17,9 @@ class OnboardingService {
   }) async {
     final trackingStart = DateTime.now().toIso8601String();
 
+    final localUserId = await AppStorage.getUserId();
     final payload = {
+      if (localUserId != null && localUserId.isNotEmpty) 'user_id': localUserId,
       'employment_status': employmentStatus,
       'monthly_income': monthlyIncome,
       'daily_budget': dailyBudget,

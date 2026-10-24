@@ -75,36 +75,47 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _fetchSummary() async {
-    // If userId not stored locally, attempt to initialize via backend
+    // If userId not stored locally, verify authentication
     if (_userId == null) {
-      try {
-        final initRes = await ApiClient().get('/profile/init');
-        if (initRes is Map<String, dynamic> && initRes['data']?['id'] != null) {
-          _userId = initRes['data']['id'] as String;
-          await AppStorage.setUserId(_userId!);
-
-          final bank = (initRes['data']?['selected_bank'] ??
-              initRes['data']?['user_metadata']?['selected_bank']) as String?;
-          if (bank != null && bank.isNotEmpty) {
-            _selectedBank = bank;
-            await AppStorage.setSelectedBank(bank);
-          }
-
-          final tracking = (initRes['data']?['tracking_start'] ??
-              initRes['data']?['user_metadata']?['tracking_start']) as String?;
-          if (tracking != null && tracking.isNotEmpty) {
-            await AppStorage.setTrackingStartDate(tracking);
-          }
-
-          await AppStorage.setIsOnboarded(true);
-        }
-      } catch (e) {
+      final loggedIn = await AppStorage.isLoggedIn();
+      if (!loggedIn) {
         if (mounted) {
-          setState(() {
-            _errorMessage = 'Could not connect to SpendSmart backend. Tap to retry.';
-          });
+          Navigator.pushNamedAndRemoveUntil(context, RouteNames.login, (route) => false);
         }
         return;
+      }
+      _userId = await AppStorage.getUserId();
+
+      if (_userId == null) {
+        try {
+          final initRes = await ApiClient().get('/profile/init');
+          if (initRes is Map<String, dynamic> && initRes['data']?['id'] != null) {
+            _userId = initRes['data']['id'] as String;
+            await AppStorage.setUserId(_userId!);
+
+            final bank = (initRes['data']?['selected_bank'] ??
+                initRes['data']?['user_metadata']?['selected_bank']) as String?;
+            if (bank != null && bank.isNotEmpty) {
+              _selectedBank = bank;
+              await AppStorage.setSelectedBank(bank);
+            }
+
+            final tracking = (initRes['data']?['tracking_start'] ??
+                initRes['data']?['user_metadata']?['tracking_start']) as String?;
+            if (tracking != null && tracking.isNotEmpty) {
+              await AppStorage.setTrackingStartDate(tracking);
+            }
+
+            await AppStorage.setIsOnboarded(true);
+          }
+        } catch (e) {
+          if (mounted) {
+            setState(() {
+              _errorMessage = 'Could not connect to SpendSmart backend. Tap to retry.';
+            });
+          }
+          return;
+        }
       }
     }
 
@@ -367,6 +378,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 : const Icon(Icons.sync_rounded),
             tooltip: 'Sync Bank SMS',
             onPressed: _syncSmsTransactions,
+          ),
+          IconButton(
+            icon: const Icon(Icons.person_outline_rounded),
+            tooltip: 'Account Profile',
+            onPressed: () => Navigator.pushNamed(context, RouteNames.profile),
           ),
         ],
       ),

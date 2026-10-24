@@ -39,12 +39,20 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
   }
 
   Future<void> _checkNavigation() async {
-    await Future.delayed(const Duration(milliseconds: 2000));
+    await Future.delayed(const Duration(milliseconds: 1500));
     if (!mounted) return;
+
+    final isLoggedIn = await AppStorage.isLoggedIn();
+    if (!mounted) return;
+
+    if (!isLoggedIn) {
+      Navigator.pushReplacementNamed(context, RouteNames.login);
+      return;
+    }
 
     final isOnboarded = await AppStorage.isOnboarded();
-
     if (!mounted) return;
+
     if (isOnboarded) {
       Navigator.pushReplacementNamed(context, RouteNames.home);
     } else {

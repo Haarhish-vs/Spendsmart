@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 
+import '../utils/app_storage.dart';
+
 class ApiClient {
   // Live Render production backend
   static const String productionBaseUrl = 'https://spendsmart-k8sh.onrender.com/api/v1';
@@ -32,10 +34,22 @@ class ApiClient {
 
   String get baseUrl => activeBaseUrl;
 
+  Future<Map<String, String>> _getHeaders() async {
+    final headers = <String, String>{
+      'Content-Type': 'application/json',
+    };
+    final token = await AppStorage.getAuthToken();
+    if (token != null && token.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $token';
+    }
+    return headers;
+  }
+
   Future<dynamic> get(String endpoint) async {
+    final headers = await _getHeaders();
     return _executeWithFallback((url) => _client.get(
           Uri.parse('$url$endpoint'),
-          headers: {'Content-Type': 'application/json'},
+          headers: headers,
         ));
   }
 
@@ -43,9 +57,10 @@ class ApiClient {
     String endpoint,
     Map<String, dynamic> body,
   ) async {
+    final headers = await _getHeaders();
     return _executeWithFallback((url) => _client.post(
           Uri.parse('$url$endpoint'),
-          headers: {'Content-Type': 'application/json'},
+          headers: headers,
           body: jsonEncode(body),
         ));
   }
@@ -54,17 +69,19 @@ class ApiClient {
     String endpoint,
     Map<String, dynamic> body,
   ) async {
+    final headers = await _getHeaders();
     return _executeWithFallback((url) => _client.put(
           Uri.parse('$url$endpoint'),
-          headers: {'Content-Type': 'application/json'},
+          headers: headers,
           body: jsonEncode(body),
         ));
   }
 
   Future<dynamic> delete(String endpoint) async {
+    final headers = await _getHeaders();
     return _executeWithFallback((url) => _client.delete(
           Uri.parse('$url$endpoint'),
-          headers: {'Content-Type': 'application/json'},
+          headers: headers,
         ));
   }
 
