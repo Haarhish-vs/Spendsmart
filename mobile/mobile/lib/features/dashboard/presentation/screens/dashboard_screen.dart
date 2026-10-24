@@ -9,6 +9,7 @@ import 'package:mobile/core/utils/app_storage.dart';
 import 'package:mobile/core/utils/formatters.dart';
 import 'package:mobile/core/widgets/app_card.dart';
 import 'package:mobile/core/widgets/empty_state.dart';
+import 'package:mobile/features/notifications/services/push_notification_service.dart';
 import 'package:mobile/features/transactions/services/sms_parser_service.dart';
 import 'package:mobile/features/transactions/services/transaction_service.dart';
 
@@ -44,6 +45,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void initState() {
     super.initState();
     _smsParserService = SmsParserService(_transactionService);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      PushNotificationService.handlePendingInitialMessage();
+    });
     _loadInitialData();
   }
 
@@ -58,6 +62,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _smsPermissionGranted = await _smsParserService.hasSmsPermission();
 
     await _fetchSummary();
+    PushNotificationService.syncDeviceToken();
 
     if (mounted) setState(() => _isLoading = false);
 
@@ -424,7 +429,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         const Text('Recent Transactions', style: AppTextStyles.heading2),
                         TextButton(
                           onPressed: () async {
-                            await Navigator.pushNamed(context, '/transactions');
+                            await Navigator.pushNamed(context, RouteNames.transactions);
                             _fetchSummary();
                           },
                           child: const Text('View All >', style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.primary)),
@@ -440,7 +445,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
       floatingActionButton: FloatingActionButton(
         onPressed: () async {
-          final res = await Navigator.pushNamed(context, '/add-transaction');
+          final res = await Navigator.pushNamed(context, RouteNames.addTransaction);
           if (res == true) {
             _fetchSummary();
           }
@@ -457,13 +462,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
         elevation: 8,
         onTap: (index) async {
           if (index == 1) {
-            await Navigator.pushNamed(context, '/transactions');
+            await Navigator.pushNamed(context, RouteNames.transactions);
             _fetchSummary();
           } else if (index == 2) {
-            await Navigator.pushNamed(context, '/analytics');
+            await Navigator.pushNamed(context, RouteNames.analytics);
             _fetchSummary();
           } else if (index == 3) {
-            await Navigator.pushNamed(context, '/budgets');
+            await Navigator.pushNamed(context, RouteNames.budgets);
             _fetchSummary();
           }
         },

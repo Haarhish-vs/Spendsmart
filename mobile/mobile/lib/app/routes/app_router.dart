@@ -33,10 +33,12 @@ class AppRouter {
       case RouteNames.transactions:
         return MaterialPageRoute(builder: (_) => const TransactionsScreen());
       case RouteNames.addTransaction:
+      case '/add-transaction':
         return MaterialPageRoute(builder: (_) => const AddEditTransactionScreen());
       case RouteNames.budgets:
         return MaterialPageRoute(builder: (_) => const BudgetsScreen());
       case RouteNames.createBudget:
+      case '/budgets/create':
         return MaterialPageRoute(builder: (_) => const CreateBudgetScreen());
       case RouteNames.analytics:
         return MaterialPageRoute(builder: (_) => const AnalyticsScreen());

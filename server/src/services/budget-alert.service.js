@@ -103,7 +103,33 @@ class BudgetAlertService {
         continue;
       }
 
-      const totalSpent = (txsInPeriod || []).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+      // Retrieve user's tracking_start date from profile (fallback to auth.users)
+      let trackingStart = null;
+      try {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('tracking_start')
+          .eq('id', userId)
+          .maybeSingle();
+
+        trackingStart = profile?.tracking_start || null;
+
+        if (!trackingStart) {
+          const { data: userData } = await supabase.auth.admin.getUserById(userId);
+          trackingStart = userData?.user?.user_metadata?.tracking_start || null;
+        }
+      } catch (_) {}
+
+      const trackingDayStart = trackingStart
+        ? dateUtils.getDailyBoundaries(new Date(trackingStart)).start
+        : null;
+
+      const eligibleTxs = (txsInPeriod || []).filter((tx) => {
+        if (!trackingDayStart) return true;
+        return new Date(tx.transaction_date).toISOString() >= trackingDayStart;
+      });
+
+      const totalSpent = eligibleTxs.reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
       const prevSpent = Math.max(0, totalSpent - currentTxAmount);
 
       const prevPercent = (prevSpent / budgetAmount) * 100;
@@ -127,12 +153,6 @@ class BudgetAlertService {
       if (crossedThresholds.length === 0) {
         continue;
       }
-
-      // Spam Prevention Policy:
-      // When a single transaction crosses multiple thresholds (e.g. 50% & 80%),
-      // record history for all crossed thresholds, but dispatch push notification
-      // only for the highest newly crossed threshold.
-      const highestThreshold = crossedThresholds[crossedThresholds.length - 1];
 
       for (const t of crossedThresholds) {
         // 5. Prevent Duplicate Notifications in this period
@@ -187,28 +207,26 @@ class BudgetAlertService {
           relatedBudgetId: budget.id,
         });
 
-        // 8. Deliver FCM Push Notification (for the highest crossed threshold)
+        // 8. Deliver FCM Push Notification for this crossed threshold
         let pushResult = null;
-        if (t.percentage === highestThreshold.percentage) {
-          const tokens = await notificationRepository.getActiveTokensForUser(userId);
-          if (tokens && tokens.length > 0) {
-            pushResult = await fcmService.sendPushNotification({
-              tokens,
-              title,
-              body,
-              data: {
-                notification_type: 'budget_threshold',
-                budget_id: budget.id,
-                period: budget.period,
-                threshold: String(t.percentage),
-                route: '/budgets',
-              },
-            });
+        const tokens = await notificationRepository.getActiveTokensForUser(userId);
+        if (tokens && tokens.length > 0) {
+          pushResult = await fcmService.sendPushNotification({
+            tokens,
+            title,
+            body,
+            data: {
+              notification_type: 'budget_threshold',
+              budget_id: budget.id,
+              period: budget.period,
+              threshold: String(t.percentage),
+              route: '/budgets',
+            },
+          });
 
-            // Cleanup invalid tokens if any detected
-            if (pushResult && pushResult.invalidTokens && pushResult.invalidTokens.length > 0) {
-              await notificationRepository.deactivateTokens(pushResult.invalidTokens);
-            }
+          // Cleanup invalid tokens if any detected
+          if (pushResult && pushResult.invalidTokens && pushResult.invalidTokens.length > 0) {
+            await notificationRepository.deactivateTokens(pushResult.invalidTokens);
           }
         }
 
@@ -224,6 +242,7 @@ class BudgetAlertService {
           pushDelivered: pushResult ? pushResult.success : false,
         });
       }
+
     }
 
     return results;

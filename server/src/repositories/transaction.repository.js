@@ -90,8 +90,7 @@ class TransactionRepository {
     // Check for same amount, merchant, and same day
     if (merchant && amount) {
       const txDateObj = new Date(transaction_date);
-      const startOfDay = new Date(txDateObj.getFullYear(), txDateObj.getMonth(), txDateObj.getDate()).toISOString();
-      const endOfDay = new Date(txDateObj.getFullYear(), txDateObj.getMonth(), txDateObj.getDate(), 23, 59, 59).toISOString();
+      const { start: startOfDay, end: endOfDay } = dateUtils.getDailyBoundaries(txDateObj);
 
       const { data: existingSimilarTx } = await supabase
         .from('transactions')
@@ -206,13 +205,24 @@ class TransactionRepository {
 
     if (txErr) throw txErr;
 
-    // Fetch user metadata for selected bank & tracking_start
+    // Fetch user selected bank & tracking_start from profiles (fallback to auth.users)
     let selectedBank = null;
     let trackingStart = null;
     try {
-      const { data: userData } = await supabase.auth.admin.getUserById(userId);
-      selectedBank = userData?.user?.user_metadata?.selected_bank || null;
-      trackingStart = userData?.user?.user_metadata?.tracking_start || null;
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('selected_bank, tracking_start')
+        .eq('id', userId)
+        .maybeSingle();
+
+      selectedBank = profile?.selected_bank || null;
+      trackingStart = profile?.tracking_start || null;
+
+      if (!selectedBank || !trackingStart) {
+        const { data: userData } = await supabase.auth.admin.getUserById(userId);
+        selectedBank = selectedBank || userData?.user?.user_metadata?.selected_bank || null;
+        trackingStart = trackingStart || userData?.user?.user_metadata?.tracking_start || null;
+      }
     } catch (_) {}
 
     // Normalize tracking_start to start of that calendar day in Asia/Kolkata

@@ -14,6 +14,7 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 
 class PushNotificationService {
   static final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+  static RemoteMessage? pendingInitialMessage;
 
   static Future<void> initialize() async {
     try {
@@ -41,62 +42,88 @@ class PushNotificationService {
 
       // 3. Listen to token refresh
       messaging.onTokenRefresh.listen((newToken) {
+        debugPrint('[FCM] Token refreshed, updating backend');
         _sendTokenToBackend(newToken);
       });
 
       // 4. Foreground notification handling
       FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-        if (message.notification != null) {
-          _showInAppNotificationBanner(message);
-        }
+        debugPrint('[FCM] Foreground message received: ${message.messageId}');
+        _showInAppNotificationBanner(message);
       });
 
       // 5. App opened from background notification tap
       FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+        debugPrint('[FCM] App opened from background notification tap: ${message.messageId}');
         _handleNotificationTap(message);
       });
 
       // 6. Terminated app opened from notification tap
       final initialMessage = await messaging.getInitialMessage();
       if (initialMessage != null) {
-        _handleNotificationTap(initialMessage);
+        debugPrint('[FCM] Terminated app opened from notification tap: ${initialMessage.messageId}');
+        pendingInitialMessage = initialMessage;
+        // Attempt immediate tap if navigator is ready
+        if (navigatorKey.currentState != null) {
+          _handleNotificationTap(initialMessage);
+          pendingInitialMessage = null;
+        }
       }
     } catch (e) {
-      // Graceful fallback if google-services.json not configured on local machine
-      debugPrint('Firebase messaging initialization skipped: $e');
+      debugPrint('[FCM] Firebase messaging initialization skipped: $e');
+    }
+  }
+
+  /// Process any pending notification message from a cold start once navigator is ready
+  static void handlePendingInitialMessage() {
+    if (pendingInitialMessage != null && navigatorKey.currentState != null) {
+      final msg = pendingInitialMessage!;
+      pendingInitialMessage = null;
+      _handleNotificationTap(msg);
     }
   }
 
   /// Sync currently assigned FCM token with backend
   static Future<void> syncDeviceToken() async {
     try {
+      if (Firebase.apps.isEmpty) {
+        await Firebase.initializeApp();
+      }
       final token = await FirebaseMessaging.instance.getToken();
       if (token != null) {
         await _sendTokenToBackend(token);
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[FCM] Device token retrieval failed: $e');
+    }
   }
 
   static Future<void> _sendTokenToBackend(String token) async {
     try {
       final userId = await AppStorage.getUserId();
-      if (userId == null) return;
+      if (userId == null) {
+        debugPrint('[FCM] Token sync postponed: User not logged in/onboarded yet.');
+        return;
+      }
 
       final client = ApiClient();
-      await client.post('/notifications/device-token', {
+      final res = await client.post('/notifications/device-token', {
         'userId': userId,
         'token': token,
         'platform': 'android',
       });
-    } catch (_) {}
+      debugPrint('[FCM] Device token registered with backend successfully: $res');
+    } catch (e) {
+      debugPrint('[FCM] Device token registration error: $e');
+    }
   }
 
   static void _showInAppNotificationBanner(RemoteMessage message) {
     final context = navigatorKey.currentContext;
     if (context == null) return;
 
-    final title = message.notification?.title ?? 'Budget Alert';
-    final body = message.notification?.body ?? '';
+    final title = message.notification?.title ?? message.data['title'] ?? 'Budget Alert';
+    final body = message.notification?.body ?? message.data['body'] ?? message.data['message'] ?? '';
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -110,11 +137,20 @@ class PushNotificationService {
               children: [
                 const Icon(Icons.notifications_active_rounded, color: Color(0xFFF39C12), size: 18),
                 const SizedBox(width: 8),
-                Text(title, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
               ],
             ),
-            const SizedBox(height: 4),
-            Text(body, style: const TextStyle(color: Colors.white70, fontSize: 13)),
+            if (body.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(body, style: const TextStyle(color: Colors.white70, fontSize: 13)),
+            ],
           ],
         ),
         action: SnackBarAction(
@@ -134,3 +170,4 @@ class PushNotificationService {
     navigatorKey.currentState?.pushNamed(route);
   }
 }
+

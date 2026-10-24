@@ -183,6 +183,23 @@ void main() {
       expect(parsed.bank, equals('HDFC Bank'));
     });
 
+    test('Same-day SMS received earlier in the day is preserved due to day boundary normalization', () {
+      // User sets tracking start at 15:00 today
+      final trackingStart = DateTime(2026, 10, 11, 15, 0, 0);
+
+      // SMS arrived earlier the same day at 09:30 AM
+      final sameDayMorningMessage = SmsMessage.fromJson({
+        'address': 'VK-HDFCBK-S',
+        'body': 'Your HDFC Bank account is debited by Rs.180.00 at UBER on 11-10-2026 at 09:30 AM.',
+        'date': DateTime(2026, 10, 11, 9, 30, 0).millisecondsSinceEpoch,
+      });
+
+      final parsed = parser.parseSms(sameDayMorningMessage, 'HDFC Bank', trackingStart);
+      expect(parsed, isNotNull);
+      expect(parsed!.amount, equals(180.0));
+      expect(parsed.merchant, equals('UBER'));
+    });
+
     test('SMS from a different bank logs SENDER_NOT_MATCHED diagnostic', () {
       final trackingStart = DateTime(2026, 10, 1, 0, 0, 0);
 
@@ -199,4 +216,60 @@ void main() {
       expect(recentLogs.any((l) => l.reasonCode == 'SENDER_NOT_MATCHED'), isTrue);
     });
   });
+
+  group('7. Real-World Bank SMS Formats (UPI, Cards, Diverse Senders)', () {
+    test('SBI UPI debit with "transaction of" format', () {
+      final sbiMessage = SmsMessage.fromJson({
+        'address': 'BP-SBIUPI',
+        'body': 'Your SBI UPI transaction of Rs. 150.00 to BLINKIT is successful on 11-10-2026. Ref no 6294819283.',
+        'date': DateTime(2026, 10, 11, 12, 0, 0).millisecondsSinceEpoch,
+      });
+
+      final parsed = parser.parseSms(sbiMessage, 'SBI', DateTime(2026, 10, 1));
+      expect(parsed, isNotNull);
+      expect(parsed!.amount, equals(150.0));
+      expect(parsed.merchant, equals('BLINKIT'));
+      expect(parsed.bank, equals('SBI'));
+    });
+
+    test('ICICI Bank debit with "Info: BIL*..." format', () {
+      final iciciMessage = SmsMessage.fromJson({
+        'address': 'JM-ICICIB',
+        'body': 'ICICI Bank A/c XX8765 debited for Rs 850.00 on 11-10-2026 at 02:15 PM. Info: BIL*NETFLIX. Avl Bal: INR 22,100.00.',
+        'date': DateTime(2026, 10, 11, 14, 15, 0).millisecondsSinceEpoch,
+      });
+
+      final parsed = parser.parseSms(iciciMessage, 'ICICI Bank', DateTime(2026, 10, 1));
+      expect(parsed, isNotNull);
+      expect(parsed!.amount, equals(850.0));
+      expect(parsed.merchant, equals('NETFLIX'));
+      expect(parsed.bank, equals('ICICI Bank'));
+    });
+
+    test('HDFC Bank with "debited from a/c ... to ZOMATO UPI" format', () {
+      final hdfcMessage = SmsMessage.fromJson({
+        'address': 'BW-HDFCBK',
+        'body': 'HDFC Bank: Rs 500.00 debited from a/c **3421 on 11-10-2026 to ZOMATO UPI:1234567890.',
+        'date': DateTime(2026, 10, 11, 19, 0, 0).millisecondsSinceEpoch,
+      });
+
+      final parsed = parser.parseSms(hdfcMessage, 'HDFC Bank', DateTime(2026, 10, 1));
+      expect(parsed, isNotNull);
+      expect(parsed!.amount, equals(500.0));
+      expect(parsed.merchant, equals('ZOMATO'));
+    });
+
+    test('Credits with Rupee symbol ₹ or "Cr to A/c" are strictly rejected', () {
+      expect(parser.isDebitTransaction('You have received ₹500 from John via UPI'), isFalse);
+      expect(parser.isDebitTransaction('INR 1,200.00 Cr to A/c XX1234 on 11-10-2026. Avl Bal: 15,000'), isFalse);
+      expect(parser.isDebitTransaction('Your account is credited with ₹2,500.00 cashback.'), isFalse);
+    });
+
+    test('Sent / Transferred to with ₹ symbol is accepted as valid debit', () {
+      expect(parser.isDebitTransaction('Sent ₹350.00 to SWIGGY on 11-10-2026 via UPI'), isTrue);
+      expect(parser.extractAmount('Sent ₹350.00 to SWIGGY on 11-10-2026 via UPI'), equals(350.0));
+      expect(parser.extractMerchant('Sent ₹350.00 to SWIGGY on 11-10-2026 via UPI'), equals('SWIGGY'));
+    });
+  });
 }
+

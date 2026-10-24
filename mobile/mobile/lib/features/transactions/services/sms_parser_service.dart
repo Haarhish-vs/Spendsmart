@@ -148,9 +148,14 @@ class SmsParserService {
     // 5. Strictly ignore credits, refunds, reversals, deposits
     if (lower.contains('credited') ||
         lower.contains('credit of') ||
+        lower.contains('is credited') ||
         lower.contains('deposited') ||
         lower.contains('received rs') ||
         lower.contains('received inr') ||
+        lower.contains('received ₹') ||
+        lower.contains('cr to a/c') ||
+        lower.contains('cr to') ||
+        lower.contains('cr.') ||
         lower.contains('refund of') ||
         lower.contains('reversal of') ||
         lower.contains('refund processed') ||
@@ -168,10 +173,15 @@ class SmsParserService {
       'withdrawn',
       'purchase of',
       'txn of',
+      'transaction of',
       'transferred rs',
       'transferred inr',
+      'transferred ₹',
+      'transferred to',
       'sent rs',
       'sent inr',
+      'sent ₹',
+      'sent to',
       'dr to',
       'dr.',
     ];
@@ -189,10 +199,11 @@ class SmsParserService {
   double? extractAmount(String body) {
     // 1. High priority: Amount directly paired with debit verb or action
     final priorityRegexes = [
-      RegExp(r'(?:debited\s*(?:by|for|with)?\s*(?:rs\.?|inr|₹)?)\s*([\d,]+(?:\.\d{1,2})?)', caseSensitive: false),
+      RegExp(r'(?:debited\s*(?:by|for|with|from)?\s*(?:rs\.?|inr|₹)?)\s*([\d,]+(?:\.\d{1,2})?)', caseSensitive: false),
       RegExp(r'(?:spent\s*(?:rs\.?|inr|₹)?)\s*([\d,]+(?:\.\d{1,2})?)', caseSensitive: false),
       RegExp(r'(?:paid\s*(?:rs\.?|inr|₹)?)\s*([\d,]+(?:\.\d{1,2})?)', caseSensitive: false),
-      RegExp(r'(?:txn\s*of\s*(?:rs\.?|inr|₹)?)\s*([\d,]+(?:\.\d{1,2})?)', caseSensitive: false),
+      RegExp(r'(?:(?:txn|transaction)\s*of\s*(?:rs\.?|inr|₹)?)\s*([\d,]+(?:\.\d{1,2})?)', caseSensitive: false),
+      RegExp(r'(?:(?:sent|transferred)\s*(?:rs\.?|inr|₹)?)\s*([\d,]+(?:\.\d{1,2})?)', caseSensitive: false),
       RegExp(r'(?:purchase\s*of\s*(?:rs\.?|inr|₹)?)\s*([\d,]+(?:\.\d{1,2})?)', caseSensitive: false),
       RegExp(r'([\d,]+(?:\.\d{1,2})?)\s*(?:debited|spent|paid|withdrawn)', caseSensitive: false),
     ];
@@ -408,8 +419,9 @@ class SmsParserService {
     // 4. Date & Time extraction
     final txDateTime = extractTransactionDateTime(body, smsDate);
 
-    // 5. Tracking period check: must be >= trackingStartDate and <= future buffer
-    if (txDateTime.isBefore(trackingStartDate)) {
+    // 5. Tracking period check: must be >= beginning of trackingStartDate and <= future buffer
+    final trackingDayStart = DateTime(trackingStartDate.year, trackingStartDate.month, trackingStartDate.day);
+    if (txDateTime.isBefore(trackingDayStart)) {
       _logDiagnostic(
         'BEFORE_TRACKING_START',
         'Transaction date is earlier than tracking start date',

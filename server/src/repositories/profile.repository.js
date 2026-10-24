@@ -53,18 +53,25 @@ class ProfileRepository {
       resolvedUserId = existingProfile.id;
     }
 
-    // Retrieve selected_bank & metadata from auth.users
+    // Retrieve selected_bank & metadata from profiles first, then fallback to auth.users
+    let selected_bank = existingProfile?.selected_bank || null;
+    let tracking_start = existingProfile?.tracking_start || null;
+    let employment_status = existingProfile?.employment_status || null;
+
     let metadata = {};
     try {
       const { data: userData } = await supabase.auth.admin.getUserById(resolvedUserId);
       metadata = userData?.user?.user_metadata || {};
+      selected_bank = selected_bank || metadata.selected_bank || null;
+      tracking_start = tracking_start || metadata.tracking_start || null;
+      employment_status = employment_status || metadata.employment_status || null;
     } catch (_) {}
 
     return {
       ...existingProfile,
-      selected_bank: metadata.selected_bank || null,
-      tracking_start: metadata.tracking_start || null,
-      employment_status: metadata.employment_status || null,
+      selected_bank,
+      tracking_start,
+      employment_status,
       user_metadata: metadata,
     };
   }
@@ -91,6 +98,9 @@ class ProfileRepository {
       .from('profiles')
       .update({
         monthly_income: monthly_income !== null && monthly_income !== undefined ? Number(monthly_income) : null,
+        selected_bank: selected_bank || null,
+        tracking_start: tracking_start || null,
+        employment_status: employment_status || null,
         updated_at: new Date().toISOString(),
       })
       .eq('id', userId)
@@ -200,24 +210,31 @@ class ProfileRepository {
 
     if (bErr) throw bErr;
 
-    // Retrieve selected_bank & metadata from auth.users
+    let selected_bank = profile?.selected_bank || null;
+    let tracking_start = profile?.tracking_start || null;
+    let employment_status = profile?.employment_status || null;
+
+    // Retrieve selected_bank & metadata from auth.users as fallback
     let metadata = {};
     try {
       const { data: userData } = await supabase.auth.admin.getUserById(userId);
       metadata = userData?.user?.user_metadata || {};
+      selected_bank = selected_bank || metadata.selected_bank || null;
+      tracking_start = tracking_start || metadata.tracking_start || null;
+      employment_status = employment_status || metadata.employment_status || null;
     } catch (_) {}
 
     return {
       profile: {
         ...profile,
-        selected_bank: metadata.selected_bank || null,
-        tracking_start: metadata.tracking_start || null,
-        employment_status: metadata.employment_status || null,
+        selected_bank,
+        tracking_start,
+        employment_status,
       },
       budgets: budgets || [],
-      selected_bank: metadata.selected_bank || null,
-      tracking_start: metadata.tracking_start || null,
-      employment_status: metadata.employment_status || null,
+      selected_bank,
+      tracking_start,
+      employment_status,
     };
   }
 }

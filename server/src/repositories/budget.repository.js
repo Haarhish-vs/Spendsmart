@@ -31,11 +31,21 @@ class BudgetRepository {
       .eq('user_id', userId)
       .eq('transaction_type', 'expense');
 
-    // Retrieve tracking_start from auth user_metadata
+    // Retrieve tracking_start from profile table (fallback to auth user_metadata)
     let trackingStart = null;
     try {
-      const { data: userData } = await supabase.auth.admin.getUserById(userId);
-      trackingStart = userData?.user?.user_metadata?.tracking_start || null;
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('tracking_start')
+        .eq('id', userId)
+        .maybeSingle();
+
+      trackingStart = profile?.tracking_start || null;
+
+      if (!trackingStart) {
+        const { data: userData } = await supabase.auth.admin.getUserById(userId);
+        trackingStart = userData?.user?.user_metadata?.tracking_start || null;
+      }
     } catch (_) {}
 
     // Normalize tracking_start to start of that calendar day in Asia/Kolkata
